@@ -1,0 +1,16 @@
+## Interface: 16001, 11508, 11509, 20504, 20505, 20506, 110000, 110100, 110200, 120000, 120001, 120100, 120105
+## Title: MySack
+## Notes: The last bag addon you'll ever need. One unified window for all your bags, with auto-categorization, search, and sorting.
+## Author: KD
+## Version: 1.2.0
+## SavedVariables: MySackDB
+## SavedVariablesPerCharacter: MySackCharDB
+## IconTexture: Interface\Icons\INV_Misc_Bag_10_Green
+
+Compat.lua
+Categories.lua
+Core.lua
+Bank.lua
+Options.lua
+Features.lua
+Config.lua
