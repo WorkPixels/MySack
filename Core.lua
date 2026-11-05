@@ -1483,11 +1483,13 @@ local function UpdateButton(f, btn, bag, slot, cachedData)
     end
 
     if btn.Initialize then
-        local info = debug.getinfo and debug.getinfo(btn.Initialize, "u")
-        if (info and info.nparams and info.nparams >= 4) or _G.ContainerFrameCombinedBags then
+        if _G.ContainerFrameCombinedBags then
             btn:Initialize(dummyBag, bag, slot)
         else
-            btn:Initialize(bag, slot)
+            local ok = pcall(btn.Initialize, btn, dummyBag, bag, slot)
+            if not ok then
+                btn:Initialize(bag, slot)
+            end
         end
     else
         btn:SetID(slot or 0)
