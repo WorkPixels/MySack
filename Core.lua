@@ -1220,7 +1220,10 @@ local function GetOrCreateDummyBag(f, bagID)
     if not f.dummyBags[bagID] then
         local dummy = CreateFrame("Frame", f:GetName().."DummyBag"..bagID, f)
         dummy:SetID(bagID)
+        dummy.GetBagID = function(self) return self:GetID() end
+        dummy.MatchesBagID = function(self, id) return self:GetID() == id end
         dummy.IsCombinedBagContainer = function() return false end
+        dummy:Show()
         f.dummyBags[bagID] = dummy
     end
     return f.dummyBags[bagID]
@@ -1478,14 +1481,22 @@ local function UpdateButton(f, btn, bag, slot, cachedData)
     if btn:GetParent() ~= dummyBag then
         btn:SetParent(dummyBag)
     end
-    btn:SetID(slot or 0)
-    if btn.SetBagID then
-        btn:SetBagID(bag or 0)
+
+    if btn.Initialize then
+        local info = debug.getinfo and debug.getinfo(btn.Initialize, "u")
+        if (info and info.nparams and info.nparams >= 4) or _G.ContainerFrameCombinedBags then
+            btn:Initialize(dummyBag, bag, slot)
+        else
+            btn:Initialize(bag, slot)
+        end
     else
-        btn:SetAttribute("bagid", bag or 0)
+        btn:SetID(slot or 0)
+        if btn.SetBagID then
+            btn:SetBagID(bag or 0)
+        else
+            btn:SetAttribute("bagid", bag or 0)
+        end
     end
-    btn.bagID = bag or 0
-    btn.containerFrame = dummyBag
 
     btn.mysackBag = bag
     btn.mysackSlot = slot
