@@ -2,7 +2,7 @@
 ## Title: MySack
 ## Notes: The last bag addon you'll ever need. One unified window for all your bags, with auto-categorization, search, and sorting.
 ## Author: KD
-## Version: 1.2.0
+## Version: 1.2.1
 ## SavedVariables: MySackDB
 ## SavedVariablesPerCharacter: MySackCharDB
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10_Green
