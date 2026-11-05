@@ -6,6 +6,7 @@
 ## SavedVariables: MySackDB
 ## SavedVariablesPerCharacter: MySackCharDB
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10_Green
+## X-Curse-Project-ID: 1593463
 
 Compat.lua
 Categories.lua

@@ -1,0 +1,6 @@
+package-as: MySack
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
