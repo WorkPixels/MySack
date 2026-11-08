@@ -86,7 +86,9 @@ local function isBankBagLocked(bagID)
     elseif _G.CharacterReagentBag0Slot or _G.REAGENTBAG_CONTAINER then
         minBankBag = 6
     end
-    if bagID < minBankBag or bagID > (minBankBag + 6) then return false end
+    local maxBankBags = _G.NUM_BANKBAGSLOTS or 8
+    if maxBankBags < 8 then maxBankBags = 8 end
+    if bagID < minBankBag or bagID > (minBankBag + maxBankBags - 1) then return false end
     local numPurchased = 0
     if NS.bankOpen then
         numPurchased = (C.GetNumBankSlots and C.GetNumBankSlots()) or (GetNumBankSlots and GetNumBankSlots()) or 0
@@ -166,11 +168,21 @@ local function PlaceOrSwapBag(f, bagID)
 end
 
 local function BuildBagBar(f, bags)
+    if f.bagBar then
+        for _, b in pairs(f.bagBar) do
+            b:Hide()
+        end
+    end
     f.bagBar = {}
     local x = 12
     local lastButton
     for _, bagID in ipairs(bags) do
-        local b = CreateFrame("Button", f:GetName().."BagSlot"..bagID, f)
+        local b = _G[f:GetName().."BagSlot"..bagID]
+        if not b then
+            b = CreateFrame("Button", f:GetName().."BagSlot"..bagID, f)
+        end
+        b:ClearAllPoints()
+        b:Show()
         b:SetSize(22, 22)
         b:SetPoint("BOTTOMLEFT", x, 13)
         b.bagID = bagID
@@ -427,6 +439,7 @@ local function BuildBagBar(f, bags)
     end
     f.lastBagButton = lastButton
 end
+NS.BuildBagBar = BuildBagBar
 
 local function UpdateBagBar(f)
     if not f.bagBar then return end
@@ -1215,6 +1228,97 @@ local function GetPooledBlizzardButton()
     return nil
 end
 
+
+-- ---------------------------------------------------------------------------
+-- Bank Tab Slot Locking Helpers (for expanded bank tabs e.g. WoWF / Camelot)
+-- ---------------------------------------------------------------------------
+local bagUnlockedSlotsCache = {}
+
+local function GetUnlockedSlotsForBag(f, bag)
+    if bagUnlockedSlotsCache[bag] ~= nil then
+        return bagUnlockedSlotsCache[bag]
+    end
+
+    -- Backpack and player inventory bags (0..4) are always fully unlocked
+    if bag >= 0 and bag <= 4 then
+        local slots = (C.NumSlots and C.NumSlots(bag)) or 0
+        bagUnlockedSlotsCache[bag] = slots
+        return slots
+    end
+
+    local totalSlots = (C.NumSlots and C.NumSlots(bag)) or 0
+    if totalSlots <= 0 then
+        bagUnlockedSlotsCache[bag] = 0
+        return 0
+    end
+
+    if not NS.bankOpen then
+        local DB = _G.MySackDB
+        local key = NS.GetCharKey and NS.GetCharKey() or (UnitName("player") or "Unknown")
+        local saved = DB and DB.bankUnlocked and DB.bankUnlocked[key] and DB.bankUnlocked[key][bag]
+        if saved and (bag ~= -1 or saved < totalSlots) then
+            bagUnlockedSlotsCache[bag] = saved
+            return saved
+        end
+    end
+
+    -- For equipped bank bags (bag >= 5, e.g. bags 6..13), all slots in the equipped bag are unlocked.
+    if bag >= 5 then
+        bagUnlockedSlotsCache[bag] = totalSlots
+        if NS.bankOpen and _G.MySackDB then
+            local key = NS.GetCharKey and NS.GetCharKey() or (UnitName("player") or "Unknown")
+            _G.MySackDB.bankUnlocked = _G.MySackDB.bankUnlocked or {}
+            _G.MySackDB.bankUnlocked[key] = _G.MySackDB.bankUnlocked[key] or {}
+            _G.MySackDB.bankUnlocked[key][bag] = totalSlots
+        end
+        return totalSlots
+    end
+
+    -- For base bank container (bag == -1 / BANK_CONTAINER):
+    -- In WoW Forever, base bank container starts with 5 unlocked slots (slots 1..5),
+    -- and slots 6..32 are locked bank slots with padlocks.
+    -- Dynamically expand if items exist in higher slots or if C.NumFreeSlots reports higher.
+    local unlocked = 5
+    local maxOcc = 0
+    local occ = 0
+    for s = 1, totalSlots do
+        if C.ItemInfo(bag, s) then
+            occ = occ + 1
+            if s > maxOcc then maxOcc = s end
+        end
+    end
+
+    local free = (C.NumFreeSlots and C.NumFreeSlots(bag)) or 0
+    if free > 0 and (occ + free) < totalSlots then
+        unlocked = math.max(unlocked, occ + free)
+    end
+    if maxOcc > unlocked then
+        unlocked = maxOcc
+    end
+    if unlocked > totalSlots then
+        unlocked = totalSlots
+    end
+
+    bagUnlockedSlotsCache[bag] = unlocked
+    if NS.bankOpen and _G.MySackDB then
+        local key = NS.GetCharKey and NS.GetCharKey() or (UnitName("player") or "Unknown")
+        _G.MySackDB.bankUnlocked = _G.MySackDB.bankUnlocked or {}
+        _G.MySackDB.bankUnlocked[key] = _G.MySackDB.bankUnlocked[key] or {}
+        _G.MySackDB.bankUnlocked[key][bag] = unlocked
+    end
+    return unlocked
+end
+
+local function IsSlotLocked(f, bag, slot)
+    if bag >= 0 and bag <= 4 then return false end
+    local total = (C.NumSlots and C.NumSlots(bag)) or 0
+    local unlocked = GetUnlockedSlotsForBag(f, bag)
+    if unlocked < total then
+        return slot > unlocked
+    end
+    return false
+end
+
 local function GetOrCreateDummyBag(f, bagID)
     f.dummyBags = f.dummyBags or {}
     if not f.dummyBags[bagID] then
@@ -1631,6 +1735,7 @@ end
 -- ===========================================================================
 function MySack:Render(f)
     if not f or not f:IsShown() then return end
+    bagUnlockedSlotsCache = {}
     f.pendingRender = false
     local set = S()
     local overrides = set.overrides
@@ -1714,6 +1819,7 @@ function MySack:Render(f)
         end
         for slot = 1, n do
             local data = GetSlotDataForFrame(f, bag, slot)
+            local isLocked = isBankFrame and IsSlotLocked(f, bag, slot)
             local cat
             if isSpecialtyBag(bag) then
                 cat = "QUIVER"
@@ -1722,21 +1828,39 @@ function MySack:Render(f)
             end
             local h = set.hiddenCategories or {}
             if h[cat] then cat = "MISC" end
-            if cat == "EMPTY" then emptyCount = emptyCount + 1 end
-            add(cat, { bag = bag, slot = slot, data = data })
+            if cat == "EMPTY" and not isLocked then
+                emptyCount = emptyCount + 1
+            end
+            add(cat, { bag = bag, slot = slot, data = data, isSlotLocked = isLocked })
         end
     end
 
-    -- 2. Sort items within each category by quality desc then name.
-    for _, list in pairs(groups) do
-        table.sort(list, function(a, b)
-            local da, db = a.data, b.data
-            if not da and not db then return false end
-            if not da then return false end
-            if not db then return true end
-            if (da.quality or 0) ~= (db.quality or 0) then return (da.quality or 0) > (db.quality or 0) end
-            return (da.link or "") < (db.link or "")
-        end)
+    -- 2. Sort items within each category:
+    --    - Normal items: quality desc then link/name
+    --    - EMPTY: all usable free slots first (by bag/slot), all locked slots gathered at the bottom!
+    for catKey, list in pairs(groups) do
+        if catKey == "EMPTY" then
+            table.sort(list, function(a, b)
+                local aLocked = a.isSlotLocked and true or false
+                local bLocked = b.isSlotLocked and true or false
+                if aLocked ~= bLocked then
+                    return not aLocked
+                end
+                if a.bag ~= b.bag then
+                    return a.bag < b.bag
+                end
+                return a.slot < b.slot
+            end)
+        else
+            table.sort(list, function(a, b)
+                local da, db = a.data, b.data
+                if not da and not db then return false end
+                if not da then return false end
+                if not db then return true end
+                if (da.quality or 0) ~= (db.quality or 0) then return (da.quality or 0) > (db.quality or 0) end
+                return (da.link or "") < (db.link or "")
+            end)
+        end
     end
 
     -- 3. Shelf-pack categories: small categories share a row instead of each
@@ -1767,7 +1891,8 @@ function MySack:Render(f)
             hdrIndex = hdrIndex + 1
             local h = GetOrCreateHeader(f, hdrIndex)
             h.catKey = cat
-            h.text:SetText((Cat.GetName(cat, set) or cat) .. "  |cff808080(" .. n .. ")|r")
+            local displayN = (cat == "EMPTY" and isBankFrame and emptyCount) or n
+            h.text:SetText((Cat.GetName(cat, set) or cat) .. "  |cff808080(" .. displayN .. ")|r")
             local blockCols
             if compact then
                 -- Reserve enough width for either the item grid or the header text.
@@ -1841,13 +1966,16 @@ function MySack:Render(f)
         local key = NS.GetCharKey and NS.GetCharKey() or (UnitName("player") or "Unknown")
         local snap = (DB and DB.itemData and DB.itemData[key] and DB.itemData[key].bankSnapshot) or {}
         local numSnap = (DB and DB.itemData and DB.itemData[key] and DB.itemData[key].bankNumSlots) or {}
+        local unlockedSnap = (DB and DB.bankUnlocked and DB.bankUnlocked[key]) or {}
         for _, bag in ipairs(f.bagList) do
             if not isSpecialtyBag(bag) then
                 local n = numSnap[bag] or C.NumSlots(bag) or 0
                 total = total + n
+                local unlocked = unlockedSnap[bag] or (bag == -1 and 4) or n
                 local occ = 0
                 if snap[bag] then for _ in pairs(snap[bag]) do occ = occ + 1 end end
-                freeTotal = freeTotal + (n - occ)
+                local freeInBag = math.max(0, unlocked - occ)
+                freeTotal = freeTotal + freeInBag
             end
         end
         f.freeText:SetText(string.format("|cffffd100%d|r free / %d slots (cached)", freeTotal, total))
@@ -1856,8 +1984,11 @@ function MySack:Render(f)
             if not isSpecialtyBag(bag) then
                 local n = C.NumSlots(bag)
                 total = total + n
+                local unlocked = isBankFrame and GetUnlockedSlotsForBag(f, bag) or n
                 for slot = 1, n do
-                    if not C.ItemInfo(bag, slot) then freeTotal = freeTotal + 1 end
+                    if slot <= unlocked and not C.ItemInfo(bag, slot) then
+                        freeTotal = freeTotal + 1
+                    end
                 end
             end
         end
@@ -1894,23 +2025,28 @@ function MySack:UpdateContents(f)
         local key = NS.GetCharKey and NS.GetCharKey() or (UnitName("player") or "Unknown")
         local snap = (DB and DB.itemData and DB.itemData[key] and DB.itemData[key].bankSnapshot) or {}
         local numSnap = (DB and DB.itemData and DB.itemData[key] and DB.itemData[key].bankNumSlots) or {}
+        local unlockedSnap = (DB and DB.bankUnlocked and DB.bankUnlocked[key]) or {}
         for _, bag in ipairs(f.bagList) do
             if not isSpecialtyBag(bag) then
                 local n = numSnap[bag] or C.NumSlots(bag) or 0
                 total = total + n
+                local unlocked = unlockedSnap[bag] or (bag == -1 and 4) or n
                 local occ = 0
                 if snap[bag] then for _ in pairs(snap[bag]) do occ = occ + 1 end end
-                freeTotal = freeTotal + (n - occ)
+                local freeInBag = math.max(0, unlocked - occ)
+                freeTotal = freeTotal + freeInBag
             end
         end
         f.freeText:SetText(string.format("|cffffd100%d|r free / %d slots (cached)", freeTotal, total))
     else
+        local isBankFrame = (f == NS.bank)
         for _, bag in ipairs(f.bagList) do
             if not isSpecialtyBag(bag) then
                 local n = C.NumSlots(bag) or 0
                 total = total + n
+                local unlocked = isBankFrame and GetUnlockedSlotsForBag(f, bag) or n
                 for slot = 1, n do
-                    if not C.ItemInfo(bag, slot) then freeTotal = freeTotal + 1 end
+                    if slot <= unlocked and not C.ItemInfo(bag, slot) then freeTotal = freeTotal + 1 end
                 end
             end
         end
@@ -1974,6 +2110,7 @@ local function GetItemTooltipText(link, bag, slot)
     end
     return text:lower()
 end
+NS.GetItemTooltipText = GetItemTooltipText
 
 -- Search: fade buttons whose item name/type doesn't match.
 local QUALITY_WORDS = { poor=0, junk=0, common=1, uncommon=2, rare=3, epic=4, legendary=5, artifact=6 }

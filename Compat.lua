@@ -157,16 +157,17 @@ function C.ItemInfo(bag, slot)
         t.noValue  = t.hasNoValue
         t.bag      = bag
         t.slot     = slot
+        t.isBound  = t.isBound
         return t
     end
     if _G.GetContainerItemInfo then
-        local icon, count, locked, quality, readable, lootable, link, filtered, noValue, itemID = _G.GetContainerItemInfo(bag, slot)
+        local icon, count, locked, quality, readable, lootable, link, filtered, noValue, itemID, isBound = _G.GetContainerItemInfo(bag, slot)
         if not icon and not itemID then return nil end
         return {
             icon = icon, count = count, locked = locked, quality = quality,
             readable = readable, lootable = lootable, link = link,
             filtered = filtered, noValue = noValue, itemID = itemID,
-            bag = bag, slot = slot,
+            bag = bag, slot = slot, isBound = isBound,
         }
     end
     return nil
@@ -276,22 +277,29 @@ function C.RefreshBags()
         or _G.REAGENTBAG_CONTAINER
         or (_G.CharacterReagentBag0Slot and 5)
 
+    local numBankBags = _G.NUM_BANKBAGSLOTS or 8
+    if numBankBags < 8 then numBankBags = 8 end
+
+    local minBankBag = reagentBagID and 6 or 5
     if reagentBagID then
         C.BACKPACK_BAGS = { 0, 1, 2, 3, 4, reagentBagID }
-        local bankBags = { (_G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex.Bank) or -1 }
-        for i = 1, 7 do
-            local key = "BankBag_" .. i
-            if _G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex[key] then
-                table.insert(bankBags, _G.Enum.BagIndex[key])
-            else
-                table.insert(bankBags, 5 + i)
-            end
-        end
-        C.BANK_BAGS = bankBags
     else
         C.BACKPACK_BAGS = { 0, 1, 2, 3, 4 }
-        C.BANK_BAGS     = { -1, 5, 6, 7, 8, 9, 10, 11 }
     end
+
+    local bankBags = { (_G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex.Bank) or -1 }
+    for i = 1, numBankBags do
+        local key = "BankBag_" .. i
+        local tabKey = "CharacterBankTab_" .. i
+        if _G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex[key] then
+            table.insert(bankBags, _G.Enum.BagIndex[key])
+        elseif _G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex[tabKey] then
+            table.insert(bankBags, _G.Enum.BagIndex[tabKey])
+        else
+            table.insert(bankBags, minBankBag + i - 1)
+        end
+    end
+    C.BANK_BAGS = bankBags
 end
 C.RefreshBags()
 
@@ -339,11 +347,15 @@ function C.bagInvSlot(bagID)
         minBankBag = 6
     end
 
+    local maxBankBags = _G.NUM_BANKBAGSLOTS or 8
+    if maxBankBags < 8 then maxBankBags = 8 end
+    local maxBankBag = minBankBag + maxBankBags - 1
+
     if bagID >= 1 and bagID <= 4 then
         local id = safeSlotInfo("Bag" .. (bagID - 1) .. "Slot")
         if id then return id end
         return 30 + bagID
-    elseif bagID >= minBankBag and bagID <= (minBankBag + 6) then
+    elseif bagID >= minBankBag and bagID <= maxBankBag then
         local bankSlotIndex = bagID - (minBankBag - 1)
         if _G.BankButtonIDToInvSlotID then
             local ok, id = pcall(_G.BankButtonIDToInvSlotID, bankSlotIndex, 1)
@@ -351,7 +363,7 @@ function C.bagInvSlot(bagID)
         end
         local id = safeSlotInfo("BankBagSlot" .. bankSlotIndex) or safeSlotInfo("Bag" .. (bagID - 1) .. "Slot")
         if id then return id end
-        return 63 + bagID
+        return 67 + bankSlotIndex
     end
     return nil
 end

@@ -74,9 +74,42 @@ function NS.InitSettings()
     NS.db.customCategories = NS.db.customCategories or {}
     NS.db.hiddenCategories = NS.db.hiddenCategories or {}
     DB.itemData = DB.itemData or {}  -- cross-character bag+bank counts: [charKey] = {bags={}, bank={}, updated=0}
+
+    -- Purge any conflicting legacy custom soulbound gear category
+    if NS.db.customCategories and NS.db.customCategories["CUST_SOULDBOUND_GEAR"] then
+        NS.db.customCategories["CUST_SOULDBOUND_GEAR"] = nil
+    end
+
     if not NS.db.categoryOrder or #NS.db.categoryOrder == 0 then
         NS.db.categoryOrder = {}
         for _, k in ipairs(NS.Cat.ORDER) do table.insert(NS.db.categoryOrder, k) end
+    else
+        for i = #NS.db.categoryOrder, 1, -1 do
+            if NS.db.categoryOrder[i] == "CUST_SOULDBOUND_GEAR" then
+                table.remove(NS.db.categoryOrder, i)
+            end
+        end
+        local hasSoulbound = false
+        for _, k in ipairs(NS.db.categoryOrder) do
+            if k == "SOULBOUND_GEAR" then hasSoulbound = true; break end
+        end
+        if not hasSoulbound then
+            local equipIdx = nil
+            for i, k in ipairs(NS.db.categoryOrder) do
+                if k == "EQUIPMENT" then equipIdx = i; break end
+            end
+            if equipIdx then
+                table.insert(NS.db.categoryOrder, equipIdx, "SOULBOUND_GEAR")
+            else
+                table.insert(NS.db.categoryOrder, 1, "SOULBOUND_GEAR")
+            end
+        end
+        for i = #NS.db.categoryOrder, 1, -1 do
+            if NS.db.categoryOrder[i] == "EMPTY" then
+                table.remove(NS.db.categoryOrder, i)
+            end
+        end
+        table.insert(NS.db.categoryOrder, "EMPTY")
     end
 
     -- Migrate legacy/centered positions to default screen edges (Bank on left, Bags on bottom-right)

@@ -350,6 +350,7 @@ local function snapshotBank()
                     link = info.link,
                     itemID = info.itemID,
                     locked = info.locked,
+                    isBound = info.isBound,
                 }
                 data.bank[info.itemID] = (data.bank[info.itemID] or 0) + (info.count or 1)
             end
@@ -386,6 +387,7 @@ local function updateItemCounts()
                     quality = info.quality,
                     link = info.link,
                     itemID = info.itemID,
+                    isBound = info.isBound,
                 }
                 data.bags[info.itemID] = (data.bags[info.itemID] or 0) + (info.count or 1)
             end

@@ -15,10 +15,11 @@ end
 -- Stable category keys. Order here is the default top-to-bottom display order.
 -- Customs and user reordering are handled dynamically via settings.
 Cat.ORDER = {
-    "FAVORITE",   -- user-pinned items (handled via overrides)
-    "NEW",        -- recently acquired (optional, off by default)
-    "EQUIPMENT",  -- armor + weapons
-    "PROFESSION", -- profession tools, rods, fishing poles
+    "FAVORITE",       -- user-pinned items (handled via overrides)
+    "NEW",            -- recently acquired (optional, off by default)
+    "SOULBOUND_GEAR", -- soulbound equipment (armor + weapons)
+    "EQUIPMENT",      -- armor + weapons
+    "PROFESSION",     -- profession tools, rods, fishing poles
     "CONSUMABLE", -- food, potions, elixirs, scrolls
     "TRADE",      -- trade goods / crafting mats
     "GEM",        -- gems
@@ -34,9 +35,10 @@ Cat.ORDER = {
 }
 
 Cat.NAMES = {
-    FAVORITE   = "Favorites",
-    NEW        = "New",
-    EQUIPMENT  = "Equipment",
+    FAVORITE       = "Favorites",
+    NEW            = "New",
+    SOULBOUND_GEAR = "Soulbound Gear",
+    EQUIPMENT      = "Equipment",
     PROFESSION = "Professions",
     CONSUMABLE = "Consumables",
     TRADE      = "Trade Goods",
@@ -170,10 +172,32 @@ function Cat.Classify(data, overrides, settings)
     end
 
     local link = data.link
-    local classID, subclassID, subType
-    if link then
-        local _, _, _, _, _, _, scType, _, _, _, _, cID, scID = GetItemInfo(link)
-        classID, subclassID, subType = cID, scID, scType
+    local classID, subclassID, subType, equipSlot
+
+    -- A. Instant info via itemID (synchronous, independent of client item link formatting)
+    if data.itemID and _G.C_Item and _G.C_Item.GetItemInfoInstant then
+        local ok, _, iType, iSubType, iEqLoc, _, iCID, iSCID = pcall(_G.C_Item.GetItemInfoInstant, data.itemID)
+        if ok and iCID then
+            classID, subclassID, subType, equipSlot = iCID, iSCID, iSubType or iType, iEqLoc
+        end
+    end
+
+    -- B. Link query fallback
+    if (not classID or not equipSlot) and link then
+        local _, _, _, _, _, _, scType, _, eqLoc, _, _, cID, scID = GetItemInfo(link)
+        classID = classID or cID
+        subclassID = subclassID or scID
+        subType = subType or scType
+        equipSlot = equipSlot or eqLoc
+    end
+
+    -- C. itemID query fallback
+    if (not classID or not equipSlot) and data.itemID then
+        local _, _, _, _, _, _, scType, _, eqLoc, _, _, cID, scID = GetItemInfo(data.itemID)
+        classID = classID or cID
+        subclassID = subclassID or scID
+        subType = subType or scType
+        equipSlot = equipSlot or eqLoc
     end
 
     -- 2. Profession tools / rods / fishing poles get their own category.
@@ -184,10 +208,45 @@ function Cat.Classify(data, overrides, settings)
     -- 3. Junk: poor quality goes to its own bucket regardless of class.
     if data.quality == 0 then return "JUNK" end
 
-    -- 4. Class-based default.
+    -- 4. Equipment: split into Soulbound Gear and unbound Equipment.
+    -- STRICT: Only true wearable Armor and Weapons (excluding bags, quivers, non-equip items).
+    local isArmorOrWeapon = (classID == CLASS.Armor or classID == CLASS.Weapon or classID == 4 or classID == 2)
+    local isBagOrQuiver = (classID == CLASS.Container or classID == CLASS.Quiver or classID == 1 or classID == 11
+                           or equipSlot == "INVTYPE_BAG" or equipSlot == "INVTYPE_QUIVER")
+    local isNonEquip = (equipSlot == "INVTYPE_NON_EQUIP" or equipSlot == "")
+    local isGear = isArmorOrWeapon and not isBagOrQuiver and not isNonEquip
+
+    if isGear then
+        local isBound = data.isBound
+        if isBound == nil and data.bag and data.slot and _G.C_Item and _G.C_Item.IsBound and _G.ItemLocation then
+            local ok, loc = pcall(_G.ItemLocation.CreateFromBagAndSlot, _G.ItemLocation, data.bag, data.slot)
+            if ok and loc and loc:IsValid() then
+                local ok2, b = pcall(_G.C_Item.IsBound, loc)
+                if ok2 then isBound = b end
+            end
+        end
+        if isBound == nil and NS.GetItemTooltipText then
+            local tt = NS.GetItemTooltipText(link or data.itemID, data.bag, data.slot)
+            if tt and tt ~= "" then
+                local boundWord = (_G.ITEM_SOULBOUND and _G.ITEM_SOULBOUND:lower()) or "soulbound"
+                isBound = tt:find(boundWord, 1, true) ~= nil or tt:find("soulbound", 1, true) ~= nil
+            end
+        end
+        if isBound then
+            if hidden["SOULBOUND_GEAR"] then
+                return "EQUIPMENT"
+            end
+            return "SOULBOUND_GEAR"
+        end
+        return "EQUIPMENT"
+    end
+
+    -- 5. Class-based default.
     if classID and CLASS_TO_CAT[classID] then
         return CLASS_TO_CAT[classID]
     end
+
+    if data.itemID == 6948 then return "MISC" end -- Hearthstone
 
     return "MISC"
 end
@@ -202,25 +261,38 @@ function Cat.BuildOrder(settings)
     local names = Cat.GetAllNames(settings)
 
     if userOrder then
+        local userHasSoulbound = false
+        for _, k in ipairs(userOrder) do
+            if k == "SOULBOUND_GEAR" then userHasSoulbound = true; break end
+        end
+
         for _, key in ipairs(userOrder) do
-            if not hidden[key] and not seen[key] and names[key] then
+            if key == "EQUIPMENT" and not userHasSoulbound and not seen["SOULBOUND_GEAR"] and not hidden["SOULBOUND_GEAR"] then
+                seen["SOULBOUND_GEAR"] = true
+                out[#out + 1] = "SOULBOUND_GEAR"
+            end
+            if key ~= "EMPTY" and not hidden[key] and not seen[key] and names[key] then
                 seen[key] = true
                 out[#out + 1] = key
             end
         end
     end
     for _, key in ipairs(Cat.ORDER) do
-        if not hidden[key] and not seen[key] then
+        if key ~= "EMPTY" and not hidden[key] and not seen[key] then
             seen[key] = true
             out[#out + 1] = key
         end
     end
     -- append any stray custom categories
     for key in pairs(customs) do
-        if not hidden[key] and not seen[key] then
+        if key ~= "EMPTY" and not hidden[key] and not seen[key] then
             seen[key] = true
             out[#out + 1] = key
         end
+    end
+    -- EMPTY is always the final category
+    if not hidden["EMPTY"] then
+        out[#out + 1] = "EMPTY"
     end
     return out
 end

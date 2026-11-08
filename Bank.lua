@@ -40,6 +40,11 @@ watcher:SetScript("OnEvent", function(_, event)
     if event == "BANKFRAME_OPENED" then
         NS.bankOpen = true
         tameBlizzBank()
+        if C.RefreshBags then C.RefreshBags() end
+        if NS.bank then
+            NS.bank.bagList = C.BANK_BAGS
+            if NS.BuildBagBar then NS.BuildBagBar(NS.bank, C.BANK_BAGS) end
+        end
 
         -- Defer opening MySack so Blizzard's BankFrame:OnShow completes cleanly and untainted!
         if C_Timer and C_Timer.After then
@@ -93,6 +98,11 @@ watcher:SetScript("OnEvent", function(_, event)
         end
     elseif event == "PLAYERBANKBAGSLOTS_CHANGED" or event == "PLAYERBANKSLOTS_CHANGED" or event == "BANKFRAME_TAB_PURCHASED" or event == "REAGENTBANK_PURCHASED" then
         tameBlizzBank()
+        if C.RefreshBags then C.RefreshBags() end
+        if NS.bank then
+            NS.bank.bagList = C.BANK_BAGS
+            if NS.BuildBagBar then NS.BuildBagBar(NS.bank, C.BANK_BAGS) end
+        end
         if _G.BankFrame then _G.BankFrame:SetFrameStrata("MEDIUM") end
         if NS.bank and NS.bank:IsShown() and MySack and MySack.Render then MySack:Render(NS.bank) end
     end
