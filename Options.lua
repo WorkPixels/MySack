@@ -306,16 +306,23 @@ function NS.InitHooks()
         MySack:Close()
     end
 
-    -- Debounced toggle: ensures pressing 'B' toggles MySack instantaneously on the very FIRST
-    -- keypress without double-firing if both ToggleBackpack and ToggleAllBags trigger.
-    -- Avoid calling debugstack() to prevent any execution taint.
-    local lastToggleTime = 0
+    -- Reentrancy-safe toggle: ensures pressing 'B' toggles MySack cleanly exactly once
+    -- even when Blizzard's ToggleAllBags internally invokes ToggleBackpack and ToggleBag.
+    -- Uses a next-frame deferred lock instead of a fragile millisecond timer.
+    local togglePending = false
     local function safeToggle()
         if not NS.db or not NS.db.replaceBags then return end
-        local now = GetTime()
-        if (now - lastToggleTime) < 0.05 then return end
-        lastToggleTime = now
-        MySack:Toggle()
+        if togglePending then return end
+        togglePending = true
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                togglePending = false
+                MySack:Toggle()
+            end)
+        else
+            togglePending = false
+            MySack:Toggle()
+        end
     end
 
     -- Hook bag toggle APIs securely!

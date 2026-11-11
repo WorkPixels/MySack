@@ -2311,6 +2311,9 @@ function MySack:Close()
         NS.main.needsResort = true
     end
     if NS.ClearNew then NS.ClearNew() end
+    if CloseAllBags then
+        pcall(CloseAllBags)
+    end
 end
 
 function MySack:Toggle()
