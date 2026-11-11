@@ -1340,6 +1340,8 @@ local function GetUnlockedSlotsForBag(f, bag)
 end
 
 local function IsSlotLocked(f, bag, slot)
+    local isBank = (f == NS.bank) or (f and f.GetName and f:GetName() == "MySackBankFrame")
+    if not isBank then return false end
     if bag >= 0 and bag <= 4 then return false end
     local total = (C.NumSlots and C.NumSlots(bag)) or 0
     local unlocked = GetUnlockedSlotsForBag(f, bag)
@@ -1625,21 +1627,18 @@ local function UpdateButton(f, btn, bag, slot, cachedData)
         btn:SetParent(dummyBag)
     end
 
+    btn:SetID(slot or 0)
+    if btn.SetBagID then
+        pcall(btn.SetBagID, btn, bag or 0)
+    end
     if btn.Initialize then
         if _G.ContainerFrameCombinedBags then
-            btn:Initialize(dummyBag, bag, slot)
+            pcall(btn.Initialize, btn, dummyBag, bag, slot)
         else
             local ok = pcall(btn.Initialize, btn, dummyBag, bag, slot)
             if not ok then
-                btn:Initialize(bag, slot)
+                pcall(btn.Initialize, btn, bag, slot)
             end
-        end
-    else
-        btn:SetID(slot or 0)
-        if btn.SetBagID then
-            btn:SetBagID(bag or 0)
-        else
-            btn:SetAttribute("bagid", bag or 0)
         end
     end
 
@@ -1778,7 +1777,7 @@ function MySack:Render(f)
     f.pendingRender = false
     local set = S()
     local overrides = set.overrides
-    local isBankFrame = (f == NS.bank)
+    local isBankFrame = (f == NS.bank) or (f and f.GetName and f:GetName() == "MySackBankFrame")
     local size, spacing, cols
     if isBankFrame then
         size = set.bankIconSize or set.iconSize

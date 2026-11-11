@@ -12,26 +12,26 @@ local GetItemInfo = function(...)
     return nil
 end
 
--- Stable category keys. Order here is the default top-to-bottom display order.
+    -- Stable category keys. Order here is the default top-to-bottom display order.
 -- Customs and user reordering are handled dynamically via settings.
 Cat.ORDER = {
     "FAVORITE",       -- user-pinned items (handled via overrides)
     "NEW",            -- recently acquired (optional, off by default)
-    "SOULBOUND_GEAR", -- soulbound equipment (armor + weapons)
     "EQUIPMENT",      -- armor + weapons
+    "SOULBOUND_GEAR", -- soulbound equipment (armor + weapons)
     "PROFESSION",     -- profession tools, rods, fishing poles
-    "CONSUMABLE", -- food, potions, elixirs, scrolls
-    "TRADE",      -- trade goods / crafting mats
-    "GEM",        -- gems
-    "GLYPH",      -- glyphs (Wrath+)
-    "RECIPE",     -- recipes / patterns
-    "QUEST",      -- quest items
-    "REAGENT",    -- class reagents / ammo / projectiles / quivers
-    "QUIVER",     -- Specialty bags contents / empty slots
-    "CONTAINER",  -- bags
-    "MISC",       -- everything else
-    "JUNK",       -- poor quality (grey)
-    "EMPTY",      -- free slots
+    "CONSUMABLE",     -- food, potions, elixirs, scrolls
+    "TRADE",          -- trade goods / crafting mats
+    "GEM",            -- gems
+    "GLYPH",          -- glyphs (Wrath+)
+    "RECIPE",         -- recipes / patterns
+    "QUEST",          -- quest items
+    "REAGENT",        -- class reagents / ammo / projectiles / quivers
+    "QUIVER",         -- Specialty bags contents / empty slots
+    "CONTAINER",      -- bags
+    "MISC",           -- everything else
+    "JUNK",           -- poor quality (grey)
+    "EMPTY",          -- free slots
 }
 
 Cat.NAMES = {
@@ -145,7 +145,9 @@ local CLASS_TO_CAT = {
 --   data:      normalized container info table (may be nil for empty slot)
 --   overrides: table keyed by itemID -> category key (user assignments)
 function Cat.Classify(data, overrides, settings)
-    if not data or not data.itemID then return "EMPTY" end
+    if not data or (not data.itemID and not data.link and not data.icon) then
+        return "EMPTY"
+    end
 
     -- 1. User override always wins.
     if overrides and data.itemID and overrides[data.itemID] then
@@ -154,7 +156,7 @@ function Cat.Classify(data, overrides, settings)
 
     -- 2. Check recently acquired (within 2 minutes).
     local hidden = (settings and settings.hiddenCategories) or {}
-    if not hidden["NEW"] and NS.IsNewItem and NS.IsNewItem(data.itemID) then
+    if not hidden["NEW"] and data.itemID and NS.IsNewItem and NS.IsNewItem(data.itemID) then
         return "NEW"
     end
 
@@ -171,46 +173,48 @@ function Cat.Classify(data, overrides, settings)
         end
     end
 
-    local link = data.link
-    local classID, subclassID, subType, equipSlot
+    -- Special items
+    if data.itemID == 6948 then return "MISC" end -- Hearthstone
 
-    -- A. Instant info via itemID (synchronous, independent of client item link formatting)
-    if data.itemID and _G.C_Item and _G.C_Item.GetItemInfoInstant then
-        local ok, _, iType, iSubType, iEqLoc, _, iCID, iSCID = pcall(_G.C_Item.GetItemInfoInstant, data.itemID)
-        if ok and iCID then
-            classID, subclassID, subType, equipSlot = iCID, iSCID, iSubType or iType, iEqLoc
+    local link = data.link
+    local itemType, subType, equipSlot, classID, subclassID
+
+    -- Query GetItemInfo by link or itemID
+    if link then
+        local _, _, _, _, _, iType, sType, _, eqLoc, _, _, cID, scID = GetItemInfo(link)
+        itemType, subType, equipSlot, classID, subclassID = iType, sType, eqLoc, cID, scID
+    end
+    if (not classID or not itemType or not equipSlot) and data.itemID then
+        local _, _, _, _, _, iType, sType, _, eqLoc, _, _, cID, scID = GetItemInfo(data.itemID)
+        itemType = itemType or iType
+        subType = subType or sType
+        equipSlot = equipSlot or eqLoc
+        classID = classID or cID
+        subclassID = subclassID or scID
+    end
+
+    -- Instant info fallback if GetItemInfo was not yet cached
+    if (not classID or not itemType or not equipSlot) and data.itemID and _G.C_Item and _G.C_Item.GetItemInfoInstant then
+        local ok, _, iType, iSubType, iEqLoc, _, iCID, iSCID = pcall(_G.C_Item.GetItemInfoInstant, link or data.itemID)
+        if ok then
+            itemType = itemType or iType
+            subType = subType or iSubType
+            equipSlot = equipSlot or iEqLoc
+            classID = classID or iCID
+            subclassID = subclassID or iSCID
         end
     end
 
-    -- B. Link query fallback
-    if (not classID or not equipSlot) and link then
-        local _, _, _, _, _, _, scType, _, eqLoc, _, _, cID, scID = GetItemInfo(link)
-        classID = classID or cID
-        subclassID = subclassID or scID
-        subType = subType or scType
-        equipSlot = equipSlot or eqLoc
-    end
-
-    -- C. itemID query fallback
-    if (not classID or not equipSlot) and data.itemID then
-        local _, _, _, _, _, _, scType, _, eqLoc, _, _, cID, scID = GetItemInfo(data.itemID)
-        classID = classID or cID
-        subclassID = subclassID or scID
-        subType = subType or scType
-        equipSlot = equipSlot or eqLoc
-    end
-
-    -- 2. Profession tools / rods / fishing poles get their own category.
+    -- Profession tools / rods / fishing poles get their own category.
     if Cat.IsProfessionTool(data.itemID, classID, subclassID, subType) then
         return "PROFESSION"
     end
 
-    -- 3. Junk: poor quality goes to its own bucket regardless of class.
+    -- Junk: poor quality goes to its own bucket regardless of class.
     if data.quality == 0 then return "JUNK" end
 
-    -- 4. Equipment: split into Soulbound Gear and unbound Equipment.
-    -- STRICT: Only true wearable Armor and Weapons with valid equipment slot (excluding bags, quivers, non-equip items).
-    local isArmorOrWeapon = (classID == CLASS.Armor or classID == CLASS.Weapon or classID == 4 or classID == 2)
+    -- Equipment: strictly wearable armor, weapons, and accessories with a valid equip slot
+    local isArmorOrWeapon = (classID == 4 or classID == 2 or itemType == "Armor" or itemType == "Weapon")
     local hasEquipSlot = (equipSlot and equipSlot ~= "" and equipSlot ~= "INVTYPE_NON_EQUIP" and equipSlot ~= "INVTYPE_BAG" and equipSlot ~= "INVTYPE_QUIVER")
     local isGear = isArmorOrWeapon and hasEquipSlot
 
@@ -239,12 +243,25 @@ function Cat.Classify(data, overrides, settings)
         return "EQUIPMENT"
     end
 
-    -- 5. Class-based default.
+    -- Category mapping by numeric classID or localized itemType
+    if classID == 0 or itemType == "Consumable" then return "CONSUMABLE" end
+    if classID == 7 or classID == 8 or itemType == "Trade Goods" or itemType == "Item Enhancement" then return "TRADE" end
+    if classID == 3 or itemType == "Gem" then return "GEM" end
+    if classID == 9 or itemType == "Recipe" then return "RECIPE" end
+    if classID == 12 or itemType == "Quest" then return "QUEST" end
+    if classID == 5 or classID == 6 or classID == 11 or itemType == "Reagent" or itemType == "Projectile" or itemType == "Quiver" then return "REAGENT" end
+    if classID == 1 or itemType == "Container" then return "CONTAINER" end
+    if classID == 16 or itemType == "Glyph" then return "GLYPH" end
+    if classID == 13 or itemType == "Key" then return "MISC" end
+    if classID == 15 or itemType == "Miscellaneous" then return "MISC" end
+    -- Class-based fallback table
     if classID and CLASS_TO_CAT[classID] then
-        return CLASS_TO_CAT[classID]
+        local cat = CLASS_TO_CAT[classID]
+        if cat == "EQUIPMENT" and not hasEquipSlot then
+            return "MISC"
+        end
+        return cat
     end
-
-    if data.itemID == 6948 then return "MISC" end -- Hearthstone
 
     return "MISC"
 end
@@ -259,16 +276,7 @@ function Cat.BuildOrder(settings)
     local names = Cat.GetAllNames(settings)
 
     if userOrder then
-        local userHasSoulbound = false
-        for _, k in ipairs(userOrder) do
-            if k == "SOULBOUND_GEAR" then userHasSoulbound = true; break end
-        end
-
         for _, key in ipairs(userOrder) do
-            if key == "EQUIPMENT" and not userHasSoulbound and not seen["SOULBOUND_GEAR"] and not hidden["SOULBOUND_GEAR"] then
-                seen["SOULBOUND_GEAR"] = true
-                out[#out + 1] = "SOULBOUND_GEAR"
-            end
             if key ~= "EMPTY" and not hidden[key] and not seen[key] and names[key] then
                 seen[key] = true
                 out[#out + 1] = key
@@ -288,7 +296,7 @@ function Cat.BuildOrder(settings)
             out[#out + 1] = key
         end
     end
-    -- EMPTY is always the final category
+    -- EMPTY is ALWAYS the final category!
     if not hidden["EMPTY"] then
         out[#out + 1] = "EMPTY"
     end

@@ -243,17 +243,6 @@ function NS.InitHooks()
     C = C or NS.C
     if not NS.db.replaceBags then return end
 
-    -- Safe Blizzard container hider: parent Blizzard's frames to a hidden container.
-    -- Parent to ContainerFrameContainer (native Blizzard container parent) so it stays within the container tree.
-    local Parent = _G.ContainerFrameContainer or UIParent
-    local hiddenParent = NS.hiddenContainerParent
-    if not hiddenParent then
-        hiddenParent = CreateFrame("Frame", "MySackHiddenContainer", Parent)
-        hiddenParent:SetAllPoints()
-        hiddenParent:Hide()
-        NS.hiddenContainerParent = hiddenParent
-    end
-
     -- Suppress Blizzard tutorials and disable combined bags CVar so Blizzard's combined bag never interferes
     if C_CVar and C_CVar.SetCVar then
         pcall(C_CVar.SetCVar, "combinedBags", "0")
@@ -266,43 +255,43 @@ function NS.InitHooks()
         pcall(C_CVar.SetCVarBitfield, "closedInfoFrames", LE_FRAME_TUTORIAL_UPGRADEABLE_ITEM_IN_SLOT, true)
     end
 
+    -- Tame Blizzard container frames cleanly without reparenting (which breaks secure execution)
     local function tameBlizzFrames()
         if not NS.db or not NS.db.replaceBags then return end
-        if InCombatLockdown and InCombatLockdown() then return end
         local maxFrames = _G.NUM_CONTAINER_FRAMES or 13
         for i = 1, maxFrames do
             local cf = _G["ContainerFrame" .. i]
-            if cf and cf:GetParent() ~= hiddenParent then
-                cf:SetParent(hiddenParent)
+            if cf then
+                cf:SetAlpha(0)
+                cf:EnableMouse(false)
             end
         end
-        if _G.ContainerFrameCombinedBags and _G.ContainerFrameCombinedBags:GetParent() ~= hiddenParent then
-            _G.ContainerFrameCombinedBags:SetParent(hiddenParent)
+        if _G.ContainerFrameCombinedBags then
+            _G.ContainerFrameCombinedBags:SetAlpha(0)
+            _G.ContainerFrameCombinedBags:EnableMouse(false)
         end
     end
 
     tameBlizzFrames()
 
-    -- Ensure dynamically created or updated container frames stay tamed
+    -- Ensure dynamically updated container frames remain non-interfering without altering parentage
     local maxFrames = _G.NUM_CONTAINER_FRAMES or 13
     for i = 1, maxFrames do
         local cf = _G["ContainerFrame" .. i]
         if cf then
-            hooksecurefunc(cf, "SetID", function(frame)
-                if NS.db and NS.db.replaceBags and not (InCombatLockdown and InCombatLockdown()) then
-                    if frame:GetParent() ~= hiddenParent then
-                        frame:SetParent(hiddenParent)
-                    end
+            cf:HookScript("OnShow", function(frame)
+                if NS.db and NS.db.replaceBags then
+                    frame:SetAlpha(0)
+                    frame:EnableMouse(false)
                 end
             end)
         end
     end
     if _G.ContainerFrameCombinedBags then
-        hooksecurefunc(_G.ContainerFrameCombinedBags, "Show", function(frame)
-            if NS.db and NS.db.replaceBags and not (InCombatLockdown and InCombatLockdown()) then
-                if frame:GetParent() ~= hiddenParent then
-                    frame:SetParent(hiddenParent)
-                end
+        _G.ContainerFrameCombinedBags:HookScript("OnShow", function(frame)
+            if NS.db and NS.db.replaceBags then
+                frame:SetAlpha(0)
+                frame:EnableMouse(false)
             end
         end)
     end
@@ -319,10 +308,10 @@ function NS.InitHooks()
 
     -- Debounced toggle: ensures pressing 'B' toggles MySack instantaneously on the very FIRST
     -- keypress without double-firing if both ToggleBackpack and ToggleAllBags trigger.
+    -- Avoid calling debugstack() to prevent any execution taint.
     local lastToggleTime = 0
     local function safeToggle()
         if not NS.db or not NS.db.replaceBags then return end
-        if debugstack():find("Manager") then return end
         local now = GetTime()
         if (now - lastToggleTime) < 0.05 then return end
         lastToggleTime = now
@@ -331,28 +320,20 @@ function NS.InitHooks()
 
     -- Hook bag toggle APIs securely!
     -- DO NOT hook or overwrite OpenAllBags, OpenBag, etc., as Blizzard's UIParentPanelManager
-    -- calls them internally when opening Bank, Mail, and Merchant windows. Hooking them
-    -- taints UIParentPanelManager, which taints BankFrame and breaks UseContainerItem().
-    -- NPC window auto-open is handled safely via npcWatcher below.
+    -- calls them internally when opening Bank, Mail, and Merchant windows.
     if hooksecurefunc then
         hooksecurefunc("ToggleAllBags", function()
             safeToggle()
         end)
         hooksecurefunc("ToggleBackpack", function()
-            local stack = debugstack()
-            if not stack:find("ToggleAllBags") then
-                safeToggle()
-            end
+            safeToggle()
         end)
         hooksecurefunc("ToggleBag", function(bagID)
             local keyringID = (C and C.KEYRING) or -2
             if bagID == -2 or bagID == keyringID or (_G.KEYRING_CONTAINER and bagID == _G.KEYRING_CONTAINER) then
                 return
             end
-            local stack = debugstack()
-            if not stack:find("ToggleAllBags") and not stack:find("ToggleBackpack") then
-                safeToggle()
-            end
+            safeToggle()
         end)
     end
 
