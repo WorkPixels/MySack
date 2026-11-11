@@ -36,6 +36,10 @@ NS.defaults = {
     bankScale       = 1.0,
     replaceBags     = true,
     showJunkCoin    = true,
+    bgOpacity       = 0.90,
+    bankBgOpacity   = 0.90,
+    bgColor         = { r = 0.05, g = 0.05, b = 0.05 },
+    solidBg         = true,
     borderOpacity   = 1.0,
     borderThickness = 2,
     showItemLevel   = true,
@@ -625,6 +629,39 @@ end
 -- ===========================================================================
 -- Container frame factory. Used for both the backpack window and the bank.
 -- ===========================================================================
+function NS.UpdateContainerBackdrop(f)
+    if not f or not f.SetBackdrop then return end
+    local isBank = (f == NS.bank or f:GetName() == "MySackBankFrame")
+    local db = S()
+    local opacity = isBank and (db.bankBgOpacity or db.bgOpacity) or db.bgOpacity
+    if opacity == nil then opacity = 0.90 end
+    local c = db.bgColor or { r = 0.05, g = 0.05, b = 0.05 }
+    local r, g, b = c.r or 0.05, c.g or 0.05, c.b or 0.05
+    local useSolid = (db.solidBg ~= false)
+    local bgFile = useSolid and "Interface\\ChatFrame\\ChatFrameBackground" or "Interface\\DialogFrame\\UI-DialogBox-Background"
+
+    f:SetBackdrop({
+        bgFile   = bgFile,
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile     = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets   = { left = 8, right = 8, top = 8, bottom = 8 },
+    })
+
+    if f.SetBackdropColor then
+        f:SetBackdropColor(r, g, b, opacity)
+    end
+    if f.SetBackdropBorderColor then
+        f:SetBackdropBorderColor(1, 1, 1, 1)
+    end
+end
+
+function NS.ApplyBackdrops()
+    if NS.main then NS.UpdateContainerBackdrop(NS.main) end
+    if NS.bank then NS.UpdateContainerBackdrop(NS.bank) end
+end
+
 local function CreateContainer(name, bagList, titleText)
     local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
     f.bagList = bagList
@@ -642,14 +679,7 @@ local function CreateContainer(name, bagList, titleText)
         end
     end)
 
-    if f.SetBackdrop then
-        f:SetBackdrop({
-            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = { left = 8, right = 8, top = 8, bottom = 8 },
-        })
-    end
+    NS.UpdateContainerBackdrop(f)
 
     -- Title bar (drag handle)
     local title = CreateFrame("Frame", nil, f)
@@ -1275,10 +1305,10 @@ local function GetUnlockedSlotsForBag(f, bag)
     end
 
     -- For base bank container (bag == -1 / BANK_CONTAINER):
-    -- In WoW Forever, base bank container starts with 5 unlocked slots (slots 1..5),
-    -- and slots 6..32 are locked bank slots with padlocks.
+    -- In WoW Forever, base bank container starts with 4 unlocked slots (slots 1..4),
+    -- and slots 5..32 are locked bank slots with padlocks.
     -- Dynamically expand if items exist in higher slots or if C.NumFreeSlots reports higher.
-    local unlocked = 5
+    local unlocked = 4
     local maxOcc = 0
     local occ = 0
     for s = 1, totalSlots do
@@ -1324,9 +1354,6 @@ local function GetOrCreateDummyBag(f, bagID)
     if not f.dummyBags[bagID] then
         local dummy = CreateFrame("Frame", f:GetName().."DummyBag"..bagID, f)
         dummy:SetID(bagID)
-        dummy.GetBagID = function(self) return self:GetID() end
-        dummy.MatchesBagID = function(self, id) return self:GetID() == id end
-        dummy.IsCombinedBagContainer = function() return false end
         dummy:Show()
         f.dummyBags[bagID] = dummy
     end
@@ -1357,15 +1384,17 @@ local function GetOrCreateButton(f, index, bagID)
         if _G[nm.."BattlepayItemTexture"] then _G[nm.."BattlepayItemTexture"]:Hide() end
 
         -- Custom right-click modifiers (Alt-click category selector, Ctrl-click junk protection).
-        -- Hook OnModifiedClick instead of OnMouseDown!
-        -- ContainerFrameItemButtonMixin:OnClick only calls OnModifiedClick when a modifier (Alt/Ctrl/Shift)
-        -- is down. For normal (unmodified) right-clicks, OnModifiedClick is NEVER called, leaving
-        -- normal right-clicks 100% untainted and avoiding ADDON_ACTION_BLOCKED on UseContainerItem.
-        if btn.OnModifiedClick then
-            hooksecurefunc(btn, "OnModifiedClick", function(self, button)
-                if button == "RightButton" and self.mysackData then
+        -- We securely hook ContainerFrameItemButton_OnModifiedClick / OnModifiedClick.
+        -- When normal (unmodified) right-clicks occur to use or equip items, OnModifiedClick
+        -- is never invoked, leaving normal clicks 100% untainted and eliminating ADDON_ACTION_FORBIDDEN.
+        -- NEVER hook OnMouseDown on native container buttons, as doing so taints the secure click event!
+        if not NS.modifiedClickHooked then
+            NS.modifiedClickHooked = true
+            local function handleModifiedItemClick(self, button)
+                if not self or not self.mysackData then return end
+                if button == "RightButton" then
                     if IsAltKeyDown() then
-                        if NS.MySack.OnItemRightClick then
+                        if NS.MySack and NS.MySack.OnItemRightClick then
                             NS.MySack:OnItemRightClick(self)
                         end
                     elseif IsControlKeyDown() then
@@ -1384,13 +1413,23 @@ local function GetOrCreateButton(f, index, bagID)
                         end
                     end
                 end
-            end)
-        elseif btn.HookScript then
-            btn:HookScript("OnMouseDown", function(self, button)
-                if button == "RightButton" and self.mysackData and (IsAltKeyDown() or IsControlKeyDown()) then
+            end
+
+            if _G.ContainerFrameItemButton_OnModifiedClick then
+                hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", handleModifiedItemClick)
+            end
+            if _G.ContainerFrameItemButtonMixin and _G.ContainerFrameItemButtonMixin.OnModifiedClick then
+                hooksecurefunc(_G.ContainerFrameItemButtonMixin, "OnModifiedClick", handleModifiedItemClick)
+            end
+        end
+
+        if btn.OnModifiedClick then
+            hooksecurefunc(btn, "OnModifiedClick", function(self, button)
+                if not self or not self.mysackData then return end
+                if button == "RightButton" then
                     if IsAltKeyDown() then
-                        if NS.MySack.OnItemRightClick and NS.MySack:OnItemRightClick(self) then
-                            return
+                        if NS.MySack and NS.MySack.OnItemRightClick then
+                            NS.MySack:OnItemRightClick(self)
                         end
                     elseif IsControlKeyDown() then
                         local id = self.mysackData.itemID
@@ -1956,6 +1995,7 @@ function MySack:Render(f)
     else
         f:SetScale(set.scale)
     end
+    NS.UpdateContainerBackdrop(f)
 
     -- 5. Free-slot text
     local total, freeTotal = 0, 0

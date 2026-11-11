@@ -165,6 +165,7 @@ function NS.SetProfile(name, copyCurrent)
             NS.bank:SetPoint(p[1], p[2] or UIParent, p[3], p[4], p[5])
         end
     end
+    if NS.ApplyBackdrops then NS.ApplyBackdrops() end
     if NS.RefreshCategoriesList then NS.RefreshCategoriesList() end
     return true, name
 end
@@ -514,6 +515,33 @@ function NS.InitOptions()
             local n = tonumber(arg)
             if n and n >= 0.5 and n <= 2 then db.scale = n; NS.MySack:Render(NS.main); print(PREFIX.."scale = "..n)
             else print(PREFIX.."usage: /msk scale <0.5-2.0>") end
+        elseif cmd == "opacity" or cmd == "alpha" then
+            local n = tonumber(arg)
+            if n then
+                if n > 1 then n = n / 100 end
+                if n >= 0 and n <= 1 then
+                    db.bgOpacity = n
+                    db.bankBgOpacity = n
+                    if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+                    if NS.RefreshConfig then pcall(NS.RefreshConfig) end
+                    print(PREFIX.."background opacity = "..math.floor(n * 100).."%")
+                else
+                    print(PREFIX.."usage: /msk opacity <0-100> (e.g. 0 for clear, 100 for solid)")
+                end
+            else
+                print(PREFIX.."usage: /msk opacity <0-100> (e.g. /msk opacity 80, /msk opacity 0 for clear)")
+            end
+        elseif cmd == "color" or cmd == "bgcolor" then
+            if NS.OpenColorPicker then
+                local c = db.bgColor or { r = 0.05, g = 0.05, b = 0.05 }
+                NS.OpenColorPicker(c.r or 0.05, c.g or 0.05, c.b or 0.05, function(r, g, b)
+                    db.bgColor = { r = r, g = g, b = b }
+                    if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+                    if NS.RefreshConfig then pcall(NS.RefreshConfig) end
+                end)
+            else
+                print(PREFIX.."open settings (/msk config) to choose background color.")
+            end
         elseif cmd == "protect" or cmd == "unprotect" then
             local infoType, itemID, link = GetCursorInfo()
             if infoType == "item" and itemID then
@@ -588,6 +616,8 @@ function NS.InitOptions()
             print("  /msk cols <n>       items per row (4-32)")
             print("  /msk size <n>       icon size (20-64)")
             print("  /msk scale <n>      window scale (0.5-2.0)")
+            print("  /msk opacity <0-100> background opacity (0=clear, 100=solid)")
+            print("  /msk color          open background color picker")
             print("  /msk reset          reset window position")
             print("  /msk config         open the settings panel")
             print("  /msk protect        protect the item on your cursor from selling")

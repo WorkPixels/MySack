@@ -22,6 +22,50 @@ local tabs, tabButtons = {}, {}
 local checks = {}
 
 -- ---------------------------------------------------------------------------
+-- Color Picker Helper (compatible with Dragonflight 10.0+ and Classic APIs)
+-- ---------------------------------------------------------------------------
+function NS.OpenColorPicker(r, g, b, callback)
+    local prevR, prevG, prevB = r, g, b
+    local function swatchFunc()
+        local cr, cg, cb
+        if ColorPickerFrame and ColorPickerFrame.GetColorRGB then
+            cr, cg, cb = ColorPickerFrame:GetColorRGB()
+        elseif _G.ColorPickerFrame and _G.ColorPickerFrame.GetColorRGB then
+            cr, cg, cb = _G.ColorPickerFrame:GetColorRGB()
+        end
+        if cr then callback(cr, cg, cb) end
+    end
+    local function cancelFunc(previousValues)
+        if previousValues and previousValues.r then
+            callback(previousValues.r, previousValues.g, previousValues.b)
+        else
+            callback(prevR, prevG, prevB)
+        end
+    end
+
+    local cpf = _G.ColorPickerFrame
+    if cpf and cpf.SetupColorPickerAndShow then
+        local info = {
+            swatchFunc = swatchFunc,
+            cancelFunc = cancelFunc,
+            r = r, g = g, b = b,
+            hasOpacity = false,
+        }
+        cpf:SetupColorPickerAndShow(info)
+    elseif cpf then
+        cpf.func = swatchFunc
+        cpf.cancelFunc = cancelFunc
+        cpf.previousValues = { r = r, g = g, b = b }
+        cpf.hasOpacity = false
+        if cpf.SetColorRGB then
+            cpf:SetColorRGB(r, g, b)
+        end
+        cpf:Hide()
+        cpf:Show()
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- Widget builders (parent-relative)
 -- ---------------------------------------------------------------------------
 local function makeSlider(parent, key, label, min, max, step, x, y, setter, fmt)
@@ -144,11 +188,69 @@ local function build()
     win.bankScaleSlider = makeSlider(d, "BankScale", "Scale", 0.5, 2.0, 0.1, 260, -118, function(v) NS.db.bankScale = v end)
 
     header(d, "Global Options", 8, -168, 480)
-    win.borderSlider= makeSlider(d, "BorderOpacity", "Border Opacity", 0, 1, 0.05, 8, -198, function(v) NS.db.borderOpacity = v end)
-    win.thickSlider = makeSlider(d, "BorderThickness", "Border Thickness", 1, 6, 1, 8, -238, function(v) NS.db.borderThickness = v end)
+    win.borderSlider= makeSlider(d, "BorderOpacity", "Item Border Opacity", 0, 1, 0.05, 8, -198, function(v) NS.db.borderOpacity = v end)
+    win.thickSlider = makeSlider(d, "BorderThickness", "Item Border Thickness", 1, 6, 1, 8, -238, function(v) NS.db.borderThickness = v end)
     win.gapSlider   = makeSlider(d, "GroupSpacing", "Group Spacing", 0, 24, 1, 8, -278, function(v) NS.db.groupSpacing = v end)
     makeCheck(d, "Compact", "Compact layout (pack groups side-by-side)", 6, -314,
         function() return NS.db.compactLayout end, function(v) NS.db.compactLayout = v end)
+
+    win.bgOpacitySlider = makeSlider(d, "BgOpacity", "Bags Background Opacity", 0, 1, 0.05, 260, -198, function(v)
+        NS.db.bgOpacity = v
+        if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+    end, function(v) return math.floor(v*100).."%" end)
+
+    win.bankBgOpacitySlider = makeSlider(d, "BankBgOpacity", "Bank Background Opacity", 0, 1, 0.05, 260, -238, function(v)
+        NS.db.bankBgOpacity = v
+        if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+    end, function(v) return math.floor(v*100).."%" end)
+
+    local cFrame = CreateFrame("Frame", nil, d)
+    cFrame:SetSize(220, 26)
+    cFrame:SetPoint("TOPLEFT", 260, -276)
+
+    local swatch = CreateFrame("Button", "MySackBgColorSwatch", cFrame, "BackdropTemplate")
+    swatch:SetSize(22, 22)
+    swatch:SetPoint("LEFT", 0, 0)
+    if swatch.SetBackdrop then
+        swatch:SetBackdrop({
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 10,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
+    end
+    local colorTex = swatch:CreateTexture(nil, "BACKGROUND")
+    colorTex:SetPoint("TOPLEFT", 3, -3)
+    colorTex:SetPoint("BOTTOMRIGHT", -3, 3)
+    swatch.colorTex = colorTex
+
+    local swatchLbl = cFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    swatchLbl:SetPoint("LEFT", swatch, "RIGHT", 8, 0)
+    swatchLbl:SetText("Background Color")
+
+    swatch:SetScript("OnClick", function()
+        local cur = NS.db.bgColor or { r = 0.05, g = 0.05, b = 0.05 }
+        NS.OpenColorPicker(cur.r or 0.05, cur.g or 0.05, cur.b or 0.05, function(nr, ng, nb)
+            NS.db.bgColor = { r = nr, g = ng, b = nb }
+            colorTex:SetColorTexture(nr, ng, nb, 1)
+            if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+        end)
+    end)
+    swatch:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Background Color")
+        GameTooltip:AddLine("Click to choose the bag & bank background color.", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    swatch:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    win.colorSwatch = swatch
+
+    makeCheck(d, "SolidBg", "Solid color background (vs marble)", 258, -314,
+        function() return NS.db.solidBg ~= false end,
+        function(v)
+            NS.db.solidBg = v
+            if NS.ApplyBackdrops then NS.ApplyBackdrops() end
+        end)
 
     -- ===== TAB: Categories (TBag-like) =====
     local c = newTab("Categories", 2, 122)
@@ -486,9 +588,15 @@ function NS.RefreshConfig()
     set(win.bankColSlider, "Columns", db.bankColumns or db.columns)
     set(win.bankSizeSlider, "Icon Size", db.bankIconSize or db.iconSize)
     set(win.bankScaleSlider, "Scale", db.bankScale or db.scale)
-    set(win.borderSlider, "Border Opacity", db.borderOpacity)
-    set(win.thickSlider, "Border Thickness", db.borderThickness)
+    set(win.borderSlider, "Item Border Opacity", db.borderOpacity)
+    set(win.thickSlider, "Item Border Thickness", db.borderThickness)
     set(win.gapSlider, "Group Spacing", db.groupSpacing or 2)
+    if win.bgOpacitySlider then set(win.bgOpacitySlider, "Bags Background Opacity", db.bgOpacity ~= nil and db.bgOpacity or 0.90) end
+    if win.bankBgOpacitySlider then set(win.bankBgOpacitySlider, "Bank Background Opacity", db.bankBgOpacity or db.bgOpacity or 0.90) end
+    local c = db.bgColor or { r = 0.05, g = 0.05, b = 0.05 }
+    if win.colorSwatch and win.colorSwatch.colorTex then
+        win.colorSwatch.colorTex:SetColorTexture(c.r or 0.05, c.g or 0.05, c.b or 0.05, 1)
+    end
     set(win.sellQualSlider, "Auto-sell up to", db.autoSellQuality)
     set(win.sellIlvlSlider, "Max item level", db.autoSellMaxIlvl)
     set(win.dropCapSlider, "Skip items worth over (silver)", math.floor((db.autoDropMaxValue or 0)/100))

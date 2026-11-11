@@ -209,12 +209,10 @@ function Cat.Classify(data, overrides, settings)
     if data.quality == 0 then return "JUNK" end
 
     -- 4. Equipment: split into Soulbound Gear and unbound Equipment.
-    -- STRICT: Only true wearable Armor and Weapons (excluding bags, quivers, non-equip items).
+    -- STRICT: Only true wearable Armor and Weapons with valid equipment slot (excluding bags, quivers, non-equip items).
     local isArmorOrWeapon = (classID == CLASS.Armor or classID == CLASS.Weapon or classID == 4 or classID == 2)
-    local isBagOrQuiver = (classID == CLASS.Container or classID == CLASS.Quiver or classID == 1 or classID == 11
-                           or equipSlot == "INVTYPE_BAG" or equipSlot == "INVTYPE_QUIVER")
-    local isNonEquip = (equipSlot == "INVTYPE_NON_EQUIP" or equipSlot == "")
-    local isGear = isArmorOrWeapon and not isBagOrQuiver and not isNonEquip
+    local hasEquipSlot = (equipSlot and equipSlot ~= "" and equipSlot ~= "INVTYPE_NON_EQUIP" and equipSlot ~= "INVTYPE_BAG" and equipSlot ~= "INVTYPE_QUIVER")
+    local isGear = isArmorOrWeapon and hasEquipSlot
 
     if isGear then
         local isBound = data.isBound
