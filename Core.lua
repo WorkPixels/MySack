@@ -348,6 +348,7 @@ local function BuildBagBar(f, bags)
                         -- Bring Blizzard's native BankFrame to the front so the player can click Purchase directly.
                         if _G.BankFrame then
                             _G.BankFrame:SetAlpha(1)
+                            _G.BankFrame:EnableMouse(true)
                             _G.BankFrame:SetFrameStrata("FULLSCREEN_DIALOG")
                             _G.BankFrame:Raise()
                             _G.BankFrame:Show()
@@ -933,12 +934,14 @@ local function CreateContainer(name, bagList, titleText)
           local currentAlpha = _G.BankFrame:GetAlpha()
           if currentAlpha == 0 or not _G.BankFrame:IsShown() then
             _G.BankFrame:SetAlpha(1)
+            _G.BankFrame:EnableMouse(true)
             _G.BankFrame:SetFrameStrata("FULLSCREEN_DIALOG")
             _G.BankFrame:Show()
             -- ShowUIPanel omitted to prevent UIParentPanelManager / BankFrame taint
             print("|cff66ccffMySack|r: Default Banker window shown (use this to buy bank slots or manage tabs).")
           else
             _G.BankFrame:SetAlpha(0)
+            _G.BankFrame:EnableMouse(false)
             _G.BankFrame:SetFrameStrata("MEDIUM")
             print("|cff66ccffMySack|r: Default Banker window hidden.")
           end
