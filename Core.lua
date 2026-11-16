@@ -1235,28 +1235,6 @@ end
 -- ===========================================================================
 -- Item button helpers
 -- ===========================================================================
-local blizzardButtonPool = nil
-
-local function GetPooledBlizzardButton()
-    if blizzardButtonPool == nil then
-        blizzardButtonPool = {}
-        local maxFrames = _G.NUM_CONTAINER_FRAMES or 13
-        for c = 1, maxFrames do
-            for i = 1, 36 do
-                local item = _G[("ContainerFrame%dItem%d"):format(c, i)]
-                if item then
-                    item:SetID(0)
-                    item:ClearAllPoints()
-                    table.insert(blizzardButtonPool, item)
-                end
-            end
-        end
-    end
-    if #blizzardButtonPool > 0 then
-        return table.remove(blizzardButtonPool)
-    end
-    return nil
-end
 
 
 -- ---------------------------------------------------------------------------
@@ -1366,15 +1344,8 @@ local function GetOrCreateButton(f, index, bagID)
     local btn = f.buttons[index]
     local dummyBag = GetOrCreateDummyBag(f, bagID or 0)
     if not btn then
-        btn = GetPooledBlizzardButton()
-        local nm
-        if btn then
-            nm = btn:GetName()
-            btn:SetParent(dummyBag)
-        else
-            nm = f:GetName().."Item"..index
-            btn = CreateFrame("ItemButton", nm, dummyBag, "ContainerFrameItemButtonTemplate")
-        end
+        local nm = f:GetName().."Item"..index
+        btn = CreateFrame("ItemButton", nm, dummyBag, "ContainerFrameItemButtonTemplate")
         btn:SetFrameLevel(f:GetFrameLevel() + 5)  -- ensure clicks go to item buttons over other elements
 
         -- Ensure texture reference aliases and suppress default cyan glow
@@ -1385,72 +1356,32 @@ local function GetOrCreateButton(f, index, bagID)
         if _G[nm.."NewItemTexture"] then _G[nm.."NewItemTexture"]:Hide() end
         if _G[nm.."BattlepayItemTexture"] then _G[nm.."BattlepayItemTexture"]:Hide() end
 
-        -- Custom right-click modifiers (Alt-click category selector, Ctrl-click junk protection).
-        -- We securely hook ContainerFrameItemButton_OnModifiedClick / OnModifiedClick.
-        -- When normal (unmodified) right-clicks occur to use or equip items, OnModifiedClick
-        -- is never invoked, leaving normal clicks 100% untainted and eliminating ADDON_ACTION_FORBIDDEN.
-        -- NEVER hook OnMouseDown on native container buttons, as doing so taints the secure click event!
-        if not NS.modifiedClickHooked then
-            NS.modifiedClickHooked = true
-            local function handleModifiedItemClick(self, button)
-                if not self or not self.mysackData then return end
-                if button == "RightButton" then
-                    if IsAltKeyDown() then
-                        if NS.MySack and NS.MySack.OnItemRightClick then
-                            NS.MySack:OnItemRightClick(self)
+        -- PostClick handler on this instance for Alt-click category assignment / Ctrl-click protection.
+        -- Uses plain PostClick hook to guarantee normal right-clicks (use/equip items) remain 100% untainted.
+        btn:HookScript("PostClick", function(self, button)
+            if not self or not self.mysackData then return end
+            if button == "RightButton" then
+                if IsAltKeyDown() then
+                    if NS.MySack and NS.MySack.OnItemRightClick then
+                        NS.MySack:OnItemRightClick(self)
+                    end
+                elseif IsControlKeyDown() then
+                    local id = self.mysackData.itemID
+                    if id then
+                        NS.db.userProtect = NS.db.userProtect or {}
+                        if NS.db.userProtect[id] then
+                            NS.db.userProtect[id] = nil
+                            print("|cff66ccffMySack|r removed from protected list.")
+                        else
+                            NS.db.userProtect[id] = true
+                            print("|cff66ccffMySack|r item protected from auto-sell.")
                         end
-                    elseif IsControlKeyDown() then
-                        local id = self.mysackData.itemID
-                        if id then
-                            NS.db.userProtect = NS.db.userProtect or {}
-                            if NS.db.userProtect[id] then
-                                NS.db.userProtect[id] = nil
-                                print("|cff66ccffMySack|r removed from protected list.")
-                            else
-                                NS.db.userProtect[id] = true
-                                print("|cff66ccffMySack|r item protected from auto-sell.")
-                            end
-                            if NS.RefreshProtectList then NS.RefreshProtectList() end
-                            if NS.main then NS.MySack:Render(NS.main) end
-                        end
+                        if NS.RefreshProtectList then NS.RefreshProtectList() end
+                        if NS.main then NS.MySack:Render(NS.main) end
                     end
                 end
             end
-
-            if _G.ContainerFrameItemButton_OnModifiedClick then
-                hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", handleModifiedItemClick)
-            end
-            if _G.ContainerFrameItemButtonMixin and _G.ContainerFrameItemButtonMixin.OnModifiedClick then
-                hooksecurefunc(_G.ContainerFrameItemButtonMixin, "OnModifiedClick", handleModifiedItemClick)
-            end
-        end
-
-        if btn.OnModifiedClick then
-            hooksecurefunc(btn, "OnModifiedClick", function(self, button)
-                if not self or not self.mysackData then return end
-                if button == "RightButton" then
-                    if IsAltKeyDown() then
-                        if NS.MySack and NS.MySack.OnItemRightClick then
-                            NS.MySack:OnItemRightClick(self)
-                        end
-                    elseif IsControlKeyDown() then
-                        local id = self.mysackData.itemID
-                        if id then
-                            NS.db.userProtect = NS.db.userProtect or {}
-                            if NS.db.userProtect[id] then
-                                NS.db.userProtect[id] = nil
-                                print("|cff66ccffMySack|r removed from protected list.")
-                            else
-                                NS.db.userProtect[id] = true
-                                print("|cff66ccffMySack|r item protected from auto-sell.")
-                            end
-                            if NS.RefreshProtectList then NS.RefreshProtectList() end
-                            if NS.main then NS.MySack:Render(NS.main) end
-                        end
-                    end
-                end
-            end)
-        end
+        end)
 
         -- Cache overlay for offline bank or alt bag views.
         -- When viewing live bags, this overlay is hidden so Blizzard's native
@@ -1628,19 +1559,14 @@ local function UpdateButton(f, btn, bag, slot, cachedData)
     end
 
     btn:SetID(slot or 0)
-    if btn.SetBagID then
-        pcall(btn.SetBagID, btn, bag or 0)
-    end
     if btn.Initialize then
-        if _G.ContainerFrameCombinedBags then
-            pcall(btn.Initialize, btn, dummyBag, bag, slot)
-        else
-            local ok = pcall(btn.Initialize, btn, dummyBag, bag, slot)
-            if not ok then
-                pcall(btn.Initialize, btn, bag, slot)
-            end
-        end
+        pcall(btn.Initialize, btn, bag or 0, slot or 0)
+    elseif btn.SetBagID then
+        pcall(btn.SetBagID, btn, bag or 0)
+    else
+        btn.bagID = bag or 0
     end
+    btn.bagID = bag or 0
 
     btn.mysackBag = bag
     btn.mysackSlot = slot
@@ -2311,9 +2237,6 @@ function MySack:Close()
         NS.main.needsResort = true
     end
     if NS.ClearNew then NS.ClearNew() end
-    if CloseAllBags then
-        pcall(CloseAllBags)
-    end
 end
 
 function MySack:Toggle()
