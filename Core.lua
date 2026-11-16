@@ -1558,15 +1558,12 @@ local function UpdateButton(f, btn, bag, slot, cachedData)
         btn:SetParent(dummyBag)
     end
 
+    -- Do NOT call btn:Initialize, btn:SetBagID, or set btn.bagID!
+    -- Setting btn.bagID (directly or via SetAttribute("bagid")) from addon code taints
+    -- self.bagID, which causes ContainerFrameItemButton_OnClick -> UseContainerItem(self:GetBagID(), self:GetID())
+    -- to fail with ADDON_ACTION_FORBIDDEN. Leaving btn.bagID nil makes GetBagID() fall back
+    -- cleanly to self:GetParent():GetID() (dummyBag:GetID()), which is an untainted C integer.
     btn:SetID(slot or 0)
-    if btn.Initialize then
-        pcall(btn.Initialize, btn, bag or 0, slot or 0)
-    elseif btn.SetBagID then
-        pcall(btn.SetBagID, btn, bag or 0)
-    else
-        btn.bagID = bag or 0
-    end
-    btn.bagID = bag or 0
 
     btn.mysackBag = bag
     btn.mysackSlot = slot
