@@ -68,6 +68,7 @@ NS.defaults = {
     autoDropMaxValue = 0,
     autoOpenClams    = true,
     autoFillQuiver   = true,
+    maxSoulShards    = 0,
     showFreeSlotsOnBackpack = true,
 
     userProtect      = {},
@@ -787,10 +788,13 @@ local function CreateContainer(name, bagList, titleText)
         end
 
         for _, info in ipairs(charList) do
-            local shortName = info.key:match("^[^ -]+") or info.key
-            local altRealm = info.key:match(" - (.+)$")
+            local shortName = info.key:match("^(.-) %- ") or info.key:match("^[^ -]+") or info.key
+            local altRealm = info.key:match(" %- (.+)$")
             local curRealm = GetRealmName()
-            if altRealm and altRealm ~= curRealm then
+            if (not curRealm or curRealm == "") and DB.lastRealm then
+                curRealm = DB.lastRealm
+            end
+            if altRealm and altRealm ~= "" and altRealm ~= curRealm then
                 shortName = shortName .. " (" .. altRealm .. ")"
             end
 

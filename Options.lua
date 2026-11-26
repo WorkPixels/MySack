@@ -27,8 +27,20 @@ end
 local SHARED = "Default"
 
 local function CharKey()
-    local realm = GetRealmName() or "Realm"
-    return (UnitName("player") or "Unknown") .. " - " .. realm
+    local name = UnitName("player") or "Unknown"
+    local realm = GetRealmName()
+    if (not realm or realm == "") and GetNormalizedRealmName then
+        realm = GetNormalizedRealmName()
+    end
+    if (not realm or realm == "") and _G.MySackDB and _G.MySackDB.lastRealm and _G.MySackDB.lastRealm ~= "" then
+        realm = _G.MySackDB.lastRealm
+    end
+    if not realm or realm == "" then
+        realm = "Realm"
+    elseif _G.MySackDB then
+        _G.MySackDB.lastRealm = realm
+    end
+    return name .. " - " .. realm
 end
 NS.GetCharKey = CharKey
 
@@ -74,6 +86,55 @@ function NS.InitSettings()
     NS.db.customCategories = NS.db.customCategories or {}
     NS.db.hiddenCategories = NS.db.hiddenCategories or {}
     DB.itemData = DB.itemData or {}  -- cross-character bag+bank counts: [charKey] = {bags={}, bank={}, updated=0}
+
+    -- Resolve known realm and merge/clean up any duplicate "CharName - " entries caused by empty GetRealmName()
+    local knownRealm = GetRealmName()
+    if (not knownRealm or knownRealm == "") and GetNormalizedRealmName then
+        knownRealm = GetNormalizedRealmName()
+    end
+    if not knownRealm or knownRealm == "" then
+        knownRealm = DB.lastRealm
+    end
+    if not knownRealm or knownRealm == "" then
+        for k in pairs(DB.itemData) do
+            local r = k:match(" %- (.+)$")
+            if r and r ~= "" and r ~= "Realm" then
+                knownRealm = r
+                break
+            end
+        end
+    end
+    if knownRealm and knownRealm ~= "" then
+        DB.lastRealm = knownRealm
+        local badKeys = {}
+        for k in pairs(DB.itemData) do
+            if k:match("^.+ %- $") then
+                table.insert(badKeys, k)
+            end
+        end
+        for _, badKey in ipairs(badKeys) do
+            local charName = badKey:match("^(.+) %- $")
+            local targetKey = charName and (charName .. " - " .. knownRealm)
+            local badData = DB.itemData[badKey]
+            if targetKey and badData then
+                local existing = DB.itemData[targetKey]
+                if not existing then
+                    DB.itemData[targetKey] = badData
+                elseif (badData.updated or 0) > (existing.updated or 0) then
+                    if badData.money ~= nil then existing.money = badData.money end
+                    if badData.bags then existing.bags = badData.bags end
+                    if badData.bagsSnapshot then existing.bagsSnapshot = badData.bagsSnapshot end
+                    if badData.bagsNumSlots then existing.bagsNumSlots = badData.bagsNumSlots end
+                    if badData.bank then existing.bank = badData.bank end
+                    if badData.bankSnapshot then existing.bankSnapshot = badData.bankSnapshot end
+                    if badData.bankNumSlots then existing.bankNumSlots = badData.bankNumSlots end
+                    if badData.mail then existing.mail = badData.mail end
+                    existing.updated = badData.updated
+                end
+                DB.itemData[badKey] = nil
+            end
+        end
+    end
 
     -- Purge any conflicting legacy custom soulbound gear category
     if NS.db.customCategories and NS.db.customCategories["CUST_SOULDBOUND_GEAR"] then

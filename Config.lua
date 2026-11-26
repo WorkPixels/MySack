@@ -427,6 +427,13 @@ local function build()
     win.dropCapSlider = makeSlider(a, "DropCap", "Skip items worth over (silver)", 0, 200, 5, 8, -366,
         function(v) NS.db.autoDropMaxValue = v * 100 end, function(v) return v == 0 and "No limit" or v end)
 
+    win.soulShardSlider = makeSlider(a, "MaxSoulShards", "Max Soul Shards (Warlock)", 0, 32, 1, 280, -366,
+        function(v)
+            NS.db.maxSoulShards = v
+            if v > 0 and NS.TrimSoulShards then pcall(NS.TrimSoulShards) end
+        end,
+        function(v) return v == 0 and "Off" or v end)
+
     -- ===== TAB: Profiles =====
     local p = newTab("Profiles", 5, 434)
     win.profileLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -600,6 +607,7 @@ function NS.RefreshConfig()
     set(win.sellQualSlider, "Auto-sell up to", db.autoSellQuality)
     set(win.sellIlvlSlider, "Max item level", db.autoSellMaxIlvl)
     set(win.dropCapSlider, "Skip items worth over (silver)", math.floor((db.autoDropMaxValue or 0)/100))
+    if win.soulShardSlider then set(win.soulShardSlider, "Max Soul Shards (Warlock)", db.maxSoulShards or 0) end
     for _, cb in ipairs(checks) do cb:SetChecked(cb.get()) end
     win.profileLabel:SetText("Active profile: |cffffd100"..(NS.activeProfile or "Default").."|r")
     if NS.RefreshProtectList then NS.RefreshProtectList() end

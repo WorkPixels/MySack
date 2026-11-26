@@ -505,10 +505,13 @@ local function addOwnedTooltipLines(self, itemID)
 
         for _, key in ipairs(altKeys) do
             local cnt = alts[key]
-            local shortName = key:match("^[^ -]+") or key
-            local altRealm = key:match(" - (.+)$")
+            local shortName = key:match("^(.-) %- ") or key:match("^[^ -]+") or key
+            local altRealm = key:match(" %- (.+)$")
             local curRealm = GetRealmName()
-            if altRealm and altRealm ~= curRealm then
+            if (not curRealm or curRealm == "") and _G.MySackDB and _G.MySackDB.lastRealm then
+                curRealm = _G.MySackDB.lastRealm
+            end
+            if altRealm and altRealm ~= "" and altRealm ~= curRealm then
                 shortName = shortName .. " (" .. altRealm .. ")"
             end
             self:AddDoubleLine(string.format("  |cff44aaff%s|r", shortName), string.format("|cffffffff%d|r", cnt))
@@ -689,6 +692,60 @@ local function autoFillQuiver()
     end
 end
 NS.AutoFillQuiver = autoFillQuiver
+
+local SOUL_SHARD_ID = 6265
+local lastShardTrimMsg = 0
+
+local function trimSoulShards()
+    local maxShards = NS.db and NS.db.maxSoulShards or 0
+    if maxShards <= 0 then return end
+    if InCombatLockdown() or CursorHasItem() then return end
+    if NS.bankOpen or (_G.BankFrame and _G.BankFrame:IsShown()) then return end
+    if _G.MerchantFrame and _G.MerchantFrame:IsShown() then return end
+    if _G.TradeFrame and _G.TradeFrame:IsShown() then return end
+    if _G.MailFrame and _G.MailFrame:IsShown() then return end
+
+    local generalShards = {}
+    local soulBagShards = {}
+
+    for _, bag in ipairs(C.BACKPACK_BAGS or {}) do
+        local isSpec = C.isSpecialtyBag and C.isSpecialtyBag(bag)
+        local n = C.NumSlots(bag)
+        for slot = 1, n do
+            local info = C.ItemInfo(bag, slot)
+            if info and info.itemID == SOUL_SHARD_ID and not info.locked then
+                local entry = { bag = bag, slot = slot }
+                if isSpec then
+                    table.insert(soulBagShards, entry)
+                else
+                    table.insert(generalShards, entry)
+                end
+            end
+        end
+    end
+
+    local total = #generalShards + #soulBagShards
+    if total <= maxShards then return end
+
+    -- Delete from general bags first so dedicated Soul Bags stay filled
+    local target = (#generalShards > 0) and generalShards[#generalShards] or soulBagShards[#soulBagShards]
+    if not target then return end
+
+    C.PickupItem(target.bag, target.slot)
+    if CursorHasItem() then
+        local ok = pcall(DeleteCursorItem)
+        if not ok or CursorHasItem() then
+            ClearCursor()
+            return
+        end
+        local now = GetTime()
+        if (now - lastShardTrimMsg) > 3 then
+            lastShardTrimMsg = now
+            print("|cff66ccffMySack|r trimmed excess Soul Shards (max " .. maxShards .. ").")
+        end
+    end
+end
+NS.TrimSoulShards = trimSoulShards
 
 local depositingReagents = false
 
@@ -923,6 +980,7 @@ f:RegisterEvent("MERCHANT_CLOSED")
 f:RegisterEvent("MAIL_SHOW")
 f:RegisterEvent("MAIL_INBOX_UPDATE")
 f:RegisterEvent("PLAYER_MONEY")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
 f:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_LOGIN" then
         loginTime = GetTime()
@@ -957,8 +1015,11 @@ f:SetScript("OnEvent", function(_, event, arg1)
                 pcall(depositNextReagent)
             else
                 pcall(autoFillQuiver)
+                pcall(trimSoulShards)
             end
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        pcall(trimSoulShards)
     elseif event == "BAG_UPDATE" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_CONTAINER_UPDATE" then
         pcall(UpdateBackpackButtonFreeSlots)
     elseif event == "UNIT_INVENTORY_CHANGED" then
